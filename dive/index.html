@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b1620">
+<title>飛び込み距離計測</title>
+<style>
+:root{
+  --bg:#0b1620; --panel:#122230; --line:#1f3a4f; --text:#e8f1f7; --muted:#8aa4b8;
+  --accent:#22c3ee; --ok:#3ddc84; --warn:#ffb020; --bad:#ff5a5a;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+#stage{position:relative;flex:1;min-height:0;background:#000;touch-action:none;overflow:hidden}
+#vid{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#ov{position:absolute;inset:0;width:100%;height:100%}
+#readout{position:absolute;left:50%;top:10px;transform:translateX(-50%);
+  background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.15);border-radius:14px;
+  padding:6px 16px;font-variant-numeric:tabular-nums;text-align:center;pointer-events:none;display:none}
+#readout .d{font-size:40px;font-weight:800;line-height:1.1;color:var(--ok)}
+#readout .s{font-size:13px;color:var(--muted)}
+#chip{position:absolute;left:10px;bottom:10px;padding:4px 10px;border-radius:999px;font-size:12px;
+  background:rgba(0,0,0,.6);pointer-events:none}
+#chip.armed{background:var(--bad);color:#fff;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.55}}
+#panel{background:var(--panel);border-top:1px solid var(--line);padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+  max-height:46dvh;overflow:auto}
+.title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.title h1{font-size:15px;margin:0;font-weight:700}
+.title button{padding:6px 10px;font-size:13px}
+.msg{font-size:14px;color:var(--muted);margin:4px 0 10px;line-height:1.5}
+.msg b{color:var(--text)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
+.row > *{flex:1 1 auto}
+button{font:inherit;color:var(--text);background:#1b3346;border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;font-size:15px;font-weight:600;cursor:pointer}
+button:active{transform:scale(.98)}
+button.primary{background:var(--accent);color:#04202b;border-color:transparent}
+button.go{background:var(--ok);color:#06240f;border-color:transparent}
+button.danger{background:transparent;color:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.4}
+label.small{font-size:13px;color:var(--muted);flex:0 0 auto}
+input[type=number],input[type=text],select{font:inherit;font-size:16px;color:var(--text);background:#0e1b26;
+  border:1px solid var(--line);border-radius:10px;padding:9px 10px;min-width:0}
+input[type=range]{width:100%}
+.big{font-size:44px;font-weight:800;color:var(--ok);font-variant-numeric:tabular-nums;text-align:center;line-height:1.1}
+.sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:8px}
+.hidden{display:none!important}
+#hist{position:fixed;inset:0;background:var(--bg);z-index:10;display:flex;flex-direction:column}
+#hist header{display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid var(--line)}
+#hist header h2{font-size:16px;margin:0}
+#histList{flex:1;overflow:auto;padding:8px 12px}
+.item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.item .dist{font-size:22px;font-weight:800;width:92px;font-variant-numeric:tabular-nums}
+.item .meta{flex:1;font-size:13px;color:var(--muted)}
+.item .meta b{color:var(--text);font-size:14px}
+.item button{padding:6px 10px;font-size:13px}
+.stats{padding:10px 12px;font-size:13px;color:var(--muted);border-bottom:1px solid var(--line)}
+@media (orientation:landscape) and (max-height:540px){
+  body{flex-direction:row}
+  #panel{max-height:none;width:290px;border-top:none;border-left:1px solid var(--line)}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="vid" playsinline muted></video>
+  <canvas id="ov"></canvas>
+  <div id="readout"><div class="d" id="rdD">-.--- m</div><div class="s" id="rdS"></div></div>
+  <div id="chip" class="hidden"></div>
+</div>
+
+<div id="panel">
+  <div class="title"><h1>飛び込み距離計測</h1><button id="btnHist">記録</button></div>
+
+  <!-- 映像の選択 -->
+  <section id="pSource">
+    <p class="msg">プールの<b>横（斜め横）</b>から、スタート壁と5m地点が両方映るようにスマホを固定してください。</p>
+    <div class="row"><button class="primary" id="btnCam">カメラを使う</button></div>
+    <div class="row"><button id="btnFile">動画ファイルで試す</button>
+      <input type="file" id="file" accept="video/*" class="hidden"></div>
+  </section>
+
+  <!-- キャリブレーション -->
+  <section id="pCalib" class="hidden">
+    <p class="msg" id="calibMsg"></p>
+    <div class="row">
+      <label class="small">壁から基準点までの距離</label>
+      <input type="number" id="inD" value="5" step="0.5" min="1" style="width:80px;flex:0 0 auto"> <span class="small">m</span>
+    </div>
+    <div class="row"><button id="btnCalibReset">打ち直す</button><button class="primary" id="btnCalibDone" disabled>完了</button></div>
+  </section>
+
+  <!-- 待機前 -->
+  <section id="pReady" class="hidden">
+    <p class="msg">画面をタップするとその点の距離が出ます。入水を自動で測るときは「待機」を押してください。</p>
+    <div class="row"><button class="go" id="btnArm">待機（自動検出）</button></div>
+    <div class="row"><button id="btnArmSig">合図音を鳴らして待機</button></div>
+    <div class="row" id="fileCtl">
+      <button id="btnPlay">再生</button>
+      <select id="selRate" style="flex:0 0 auto"><option value="1">1倍</option><option value="0.5" selected>0.5倍</option><option value="0.25">0.25倍</option></select>
+      <button id="btnRewind">最初へ</button>
+    </div>
+    <div class="row"><label class="small">検出感度</label><input type="range" id="inSens" min="1" max="10" value="5"><span class="small" id="sensVal">5</span></div>
+    <div class="row"><button id="btnRecalib">基準を打ち直す</button><button id="btnSource">映像を変える</button></div>
+  </section>
+
+  <!-- 待機中 -->
+  <section id="pArmed" class="hidden">
+    <p class="msg" id="armedMsg">入水を待っています…</p>
+    <div class="row"><button class="danger" id="btnDisarm">やめる</button></div>
+  </section>
+
+  <!-- 確認 -->
+  <section id="pReview" class="hidden">
+    <div class="big" id="revD">-.--- m</div>
+    <div class="sub" id="revS"></div>
+    <div class="row"><input type="range" id="inFrame" min="0" max="0" value="0"></div>
+    <div class="row"><button id="btnPrev">◀ 1コマ</button><button id="btnNext">1コマ ▶</button></div>
+    <p class="msg">ずれていたら、手が水に入った位置を<b>画面でタップ</b>して直せます。</p>
+    <div class="row"><input type="text" id="inName" placeholder="名前（省略可）"></div>
+    <div class="row"><button class="danger" id="btnDiscard">破棄</button><button class="go" id="btnSave">保存して次へ</button></div>
+  </section>
+</div>
+
+<div id="hist" class="hidden">
+  <header><h2>記録</h2><div><button id="btnCsv">CSV保存</button> <button id="btnHistClose">閉じる</button></div></header>
+  <div class="stats" id="histStats"></div>
+  <div id="histList"></div>
+</div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const vid = $('#vid'), ov = $('#ov'), octx = ov.getContext('2d'), stage = $('#stage');
+
+// ---------- 状態 ----------
+const S = {
+  mode: 'source',     // source | calib | ready | armed | review
+  srcType: null,      // camera | file
+  pts: [], D: 5,
+  H: null, Hi: null,  // 画像→実空間、実空間→画像
+  tapPt: null,        // ready中のタップ計測
+  drag: -1,
+  sens: 5,
+  t0: null,           // 合図時刻(ms)
+  review: null,
+};
+const CAL_KEY = 'dive.calib.v1', HIST_KEY = 'dive.hist.v1';
+
+// ---------- 数学：射影変換（ホモグラフィ） ----------
+function solve(A, b) {
+  const n = b.length;
+  for (let i = 0; i < n; i++) {
+    let p = i;
+    for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+    [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]];
+    if (Math.abs(A[i][i]) < 1e-12) return null;
+    for (let r = i + 1; r < n; r++) {
+      const f = A[r][i] / A[i][i];
+      for (let c = i; c < n; c++) A[r][c] -= f * A[i][c];
+      b[r] -= f * b[i];
+    }
+  }
+  const x = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i];
+    for (let c = i + 1; c < n; c++) s -= A[i][c] * x[c];
+    x[i] = s / A[i][i];
+  }
+  return x;
+}
+function homography(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [X, Y] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -X * x, -X * y]); b.push(X);
+    A.push([0, 0, 0, x, y, 1, -Y * x, -Y * y]); b.push(Y);
+  }
+  return solve(A, b);
+}
+function applyH(h, x, y) {
+  const w = h[6] * x + h[7] * y + 1;
+  return [(h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w, w];
+}
+const worldPts = D => [[0, 0], [0, 1], [D, 1], [D, 0]];
+
+function updateH() {
+  S.H = S.Hi = null;
+  if (S.pts.length === 4) {
+    const w = worldPts(S.D);
+    S.H = homography(S.pts, w);
+    S.Hi = homography(w, S.pts);
+  }
+}
+
+// ---------- 座標変換（画面⇔映像） ----------
+function vSize() { return [vid.videoWidth || 16, vid.videoHeight || 9]; }
+function fit() {
+  const r = stage.getBoundingClientRect(), [vw, vh] = vSize();
+  const sc = Math.min(r.width / vw, r.height / vh);
+  return { r, sc, ox: (r.width - vw * sc) / 2, oy: (r.height - vh * sc) / 2 };
+}
+function toVideo(cx, cy) { const f = fit(); return [(cx - f.r.left - f.ox) / f.sc, (cy - f.r.top - f.oy) / f.sc]; }
+function toScreen(x, y, f = fit()) { return [f.ox + x * f.sc, f.oy + y * f.sc]; }
+
+// ---------- 描画 ----------
+function resizeCanvas() {
+  const r = stage.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  ov.width = Math.round(r.width * dpr); ov.height = Math.round(r.height * dpr);
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+addEventListener('resize', resizeCanvas);
+new ResizeObserver(resizeCanvas).observe(stage); // 下のパネルの高さが変わったときも合わせる
+
+function draw() {
+  const f = fit();
+  octx.clearRect(0, 0, f.r.width, f.r.height);
+  if (S.mode === 'source') return;
+
+  if (S.mode === 'review' && S.review) {
+    const fr = S.review.frames[S.review.idx];
+    const [vw, vh] = vSize();
+    octx.fillStyle = '#000'; octx.fillRect(0, 0, f.r.width, f.r.height);
+    octx.drawImage(fr.c, f.ox, f.oy, vw * f.sc, vh * f.sc);
+  }
+
+  // グリッド（1mごと）
+  if (S.Hi) {
+    const maxX = Math.ceil(S.D + 1.5);
+    const P = (X, Y) => { const [x, y] = applyH(S.Hi, X, Y); return toScreen(x, y, f); };
+    octx.lineWidth = 2;
+    octx.strokeStyle = 'rgba(34,195,238,.85)';
+    for (const Y of [0, 1]) { const a = P(0, Y), b = P(maxX, Y); line(a, b); }
+    octx.font = '600 12px -apple-system,sans-serif';
+    for (let X = 0; X <= maxX; X++) {
+      const a = P(X, 0), b = P(X, 1);
+      octx.strokeStyle = (X === 0 || X === S.D) ? 'rgba(255,255,255,.95)' : 'rgba(34,195,238,.6)';
+      octx.lineWidth = (X === 0 || X === S.D) ? 2.5 : 1.5;
+      line(a, b);
+      label(`${X}m`, a[0], a[1] + 14, 'rgba(0,0,0,.6)', '#fff');
+    }
+  }
+
+  // キャリブ点
+  if (S.mode === 'calib') {
+    const names = ['①', '②', '③', '④'];
+    if (S.pts.length > 1 && !S.Hi) {
+      octx.strokeStyle = '#ffb020'; octx.lineWidth = 2; octx.beginPath();
+      S.pts.forEach((p, i) => { const [x, y] = toScreen(p[0], p[1], f); i ? octx.lineTo(x, y) : octx.moveTo(x, y); });
+      octx.stroke();
+    }
+    S.pts.forEach((p, i) => {
+      const [x, y] = toScreen(p[0], p[1], f);
+      octx.fillStyle = '#ffb020'; octx.beginPath(); octx.arc(x, y, 9, 0, 7); octx.fill();
+      octx.strokeStyle = '#000'; octx.lineWidth = 2; octx.stroke();
+      label(names[i], x + 14, y - 12, '#ffb020', '#000');
+    });
+  }
+
+  // 計測点
+  const mark = S.mode === 'review' ? S.review && S.review.pt : (S.mode === 'ready' ? S.tapPt : null);
+  if (mark && S.H) {
+    const [x, y] = toScreen(mark[0], mark[1], f);
+    const X = applyH(S.H, mark[0], mark[1])[0];
+    // 距離方向に沿った線
+    const w = applyH(S.H, mark[0], mark[1]);
+    const a = applyH(S.Hi, w[0], 0), b = applyH(S.Hi, w[0], 1);
+    octx.strokeStyle = '#3ddc84'; octx.lineWidth = 3;
+    line(toScreen(a[0], a[1], f), toScreen(b[0], b[1], f));
+    octx.fillStyle = '#3ddc84'; octx.beginPath(); octx.arc(x, y, 8, 0, 7); octx.fill();
+    octx.strokeStyle = '#000'; octx.lineWidth = 2; octx.stroke();
+    label(`${X.toFixed(3)} m`, x + 12, y - 14, '#3ddc84', '#04220f', 15);
+  }
+}
+function line(a, b) { octx.beginPath(); octx.moveTo(a[0], a[1]); octx.lineTo(b[0], b[1]); octx.stroke(); }
+function label(t, x, y, bg, fg, size = 12) {
+  octx.font = `700 ${size}px -apple-system,sans-serif`;
+  const w = octx.measureText(t).width + 10, h = size + 8;
+  octx.fillStyle = bg; octx.beginPath(); octx.roundRect(x - 5, y - h + 4, w, h, 6); octx.fill();
+  octx.fillStyle = fg; octx.fillText(t, x, y);
+}
+
+// ---------- 画面切り替え ----------
+function setMode(m) {
+  S.mode = m;
+  for (const [id, mm] of [['pSource', 'source'], ['pCalib', 'calib'], ['pReady', 'ready'], ['pArmed', 'armed'], ['pReview', 'review']])
+    $('#' + id).classList.toggle('hidden', mm !== m);
+  $('#fileCtl').classList.toggle('hidden', S.srcType !== 'file');
+  const chip = $('#chip');
+  chip.classList.toggle('hidden', m !== 'armed');
+  chip.classList.toggle('armed', m === 'armed');
+  chip.textContent = '● 待機中';
+  if (m === 'calib') calibMsg();
+  if (m !== 'ready') S.tapPt = null;
+  updateReadout();
+  draw();
+}
+function calibMsg() {
+  const D = S.D;
+  const steps = [
+    '① <b>スタート壁</b>と<b>手前のコースロープ</b>が交わる点をタップ',
+    '② <b>スタート壁</b>と<b>奥のコースロープ</b>が交わる点をタップ',
+    `③ 奥のロープ上で、壁から <b>${D} m</b> の点をタップ`,
+    `④ 手前のロープ上で、壁から <b>${D} m</b> の点をタップ`,
+  ];
+  $('#calibMsg').innerHTML = S.pts.length < 4
+    ? steps[S.pts.length] + '<br><span style="font-size:12px">点はあとからドラッグで動かせます。測りたいコースの両側のロープを選んでください。</span>'
+    : '1mごとの線がプールの目印と合っているか確認して「完了」を押してください。ずれていたら点をドラッグして直せます。';
+  $('#btnCalibDone').disabled = S.pts.length < 4 || !S.H;
+}
+function updateReadout() {
+  const r = $('#readout');
+  if (S.mode === 'armed' && S.last) {
+    r.style.display = 'block'; $('#rdD').textContent = S.last; $('#rdS').textContent = '前回';
+  } else r.style.display = 'none';
+}
+
+// ---------- 映像の入力 ----------
+let stream = null;
+$('#btnCam').onclick = async () => {
+  try {
+    stopSource();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }
+    });
+    vid.srcObject = stream; S.srcType = 'camera';
+    await vid.play();
+    keepAwake();
+    onSourceReady();
+  } catch (e) {
+    alert('カメラを開けませんでした。\n' + e.message + '\n\n※ https のページか localhost で開く必要があります。');
+  }
+};
+$('#btnFile').onclick = () => $('#file').click();
+$('#file').onchange = e => {
+  const fl = e.target.files[0]; if (!fl) return;
+  stopSource();
+  vid.srcObject = null; vid.src = URL.createObjectURL(fl); S.srcType = 'file';
+  vid.onloadeddata = () => { vid.onloadeddata = null; vid.pause(); onSourceReady(); };
+  vid.load();
+};
+function stopSource() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  vid.pause();
+}
+$('#btnSource').onclick = () => { stopSource(); setMode('source'); };
+
+function onSourceReady() {
+  setupProc();
+  // 同じ解像度なら前回の基準を使う
+  try {
+    const c = JSON.parse(localStorage.getItem(CAL_KEY) || 'null');
+    const [vw, vh] = vSize();
+    if (c && c.w === vw && c.h === vh && c.pts.length === 4) {
+      S.pts = c.pts; S.D = c.D; $('#inD').value = c.D; updateH(); buildMask();
+      resizeCanvas(); setMode('calib'); startLoop(); return;
+    }
+  } catch (e) {}
+  S.pts = []; updateH();
+  resizeCanvas(); setMode('calib');
+  startLoop();
+}
+
+let wakeLock = null;
+async function keepAwake() {
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && stream) keepAwake(); });
+
+// ---------- タッチ操作 ----------
+stage.addEventListener('pointerdown', e => {
+  const p = toVideo(e.clientX, e.clientY);
+  const [vw, vh] = vSize();
+  if (p[0] < 0 || p[1] < 0 || p[0] > vw || p[1] > vh) return;
+  if (S.mode === 'calib') {
+    const f = fit();
+    let best = -1, bd = 1e9;
+    S.pts.forEach((q, i) => { const d = Math.hypot((q[0] - p[0]) * f.sc, (q[1] - p[1]) * f.sc); if (d < bd) { bd = d; best = i; } });
+    if (best >= 0 && bd < 36) S.drag = best;
+    else if (S.pts.length < 4) { S.pts.push(p); S.drag = S.pts.length - 1; }
+    else return;
+    stage.setPointerCapture(e.pointerId);
+    updateH(); calibMsg(); draw();
+  } else if (S.mode === 'ready' && S.H) {
+    S.tapPt = p; draw();
+  } else if (S.mode === 'review' && S.H) {
+    S.review.pt = p; S.drag = 99; stage.setPointerCapture(e.pointerId); showReview();
+  }
+});
+stage.addEventListener('pointermove', e => {
+  if (S.drag < 0) return;
+  const p = toVideo(e.clientX, e.clientY);
+  if (S.mode === 'calib' && S.pts[S.drag]) { S.pts[S.drag] = p; updateH(); calibMsg(); draw(); }
+  else if (S.mode === 'review' && S.drag === 99) { S.review.pt = p; showReview(); }
+});
+stage.addEventListener('pointerup', () => { S.drag = -1; });
+stage.addEventListener('pointercancel', () => { S.drag = -1; });
+
+// ---------- キャリブレーション ----------
+$('#inD').oninput = () => { const v = parseFloat($('#inD').value); if (v > 0) { S.D = v; updateH(); calibMsg(); draw(); } };
+$('#btnCalibReset').onclick = () => { S.pts = []; updateH(); calibMsg(); draw(); };
+$('#btnCalibDone').onclick = () => {
+  const [vw, vh] = vSize();
+  localStorage.setItem(CAL_KEY, JSON.stringify({ pts: S.pts, D: S.D, w: vw, h: vh }));
+  buildMask(); setMode('ready');
+};
+$('#btnRecalib').onclick = () => setMode('calib');
+
+// ---------- 入水の自動検出 ----------
+// 縮小した映像で、コース内の「急に白くなった画素（しぶき）」を数える
+const proc = document.createElement('canvas');
+const pctx = proc.getContext('2d', { willReadFrequently: true });
+let PW = 320, PH = 180, pscale = 1;
+let maskIdx = null, maskX = null, maskY = null, bg = null, dev = null;
+function setupProc() {
+  const [vw, vh] = vSize();
+  PW = 320; pscale = PW / vw; PH = Math.round(vh * pscale);
+  proc.width = PW; proc.height = PH;
+}
+function buildMask() {
+  if (!S.H) return;
+  const cx = S.pts.reduce((a, p) => a + p[0], 0) / 4, cy = S.pts.reduce((a, p) => a + p[1], 0) / 4;
+  const w0 = applyH(S.H, cx, cy)[2];
+  const idx = [], xs = [], ys = [];
+  const maxX = S.D + 1.5;
+  for (let py = 0; py < PH; py++) for (let px = 0; px < PW; px++) {
+    const [X, Y, w] = applyH(S.H, (px + .5) / pscale, (py + .5) / pscale);
+    if (w * w0 <= 0) continue;
+    if (X >= 0.3 && X <= maxX && Y >= -0.05 && Y <= 1.05) { idx.push(py * PW + px); xs.push(X); ys.push(Y); }
+  }
+  maskIdx = Int32Array.from(idx); maskX = Float32Array.from(xs); maskY = Float32Array.from(ys);
+  bg = new Float32Array(PW * PH); dev = new Float32Array(PW * PH);
+}
+
+// 直近のコマを保存しておく（見直し用）
+const RING = 60;
+let ring = [], ringPos = 0;
+function ringPush(t) {
+  let slot = ring[ringPos];
+  const [vw, vh] = vSize();
+  const rw = Math.min(720, vw), rh = Math.round(vh * rw / vw);
+  if (!slot || slot.c.width !== rw || slot.c.height !== rh) {
+    const c = document.createElement('canvas'); c.width = rw; c.height = rh;
+    slot = ring[ringPos] = { c, ctx: c.getContext('2d'), t: 0, n: 0 };
+  }
+  slot.ctx.drawImage(vid, 0, 0, rw, rh);
+  slot.t = t; slot.n = ++frameNo;
+  ringPos = (ringPos + 1) % RING;
+  return slot;
+}
+let frameNo = 0;
+
+let det = null; // 検出の進み具合
+function arm(withSignal) {
+  if (!maskIdx) buildMask();
+  ring = []; ringPos = 0;
+  det = { warm: 0, hits: 0, cand: null, trig: null, post: 0 };
+  S.t0 = null;
+  setMode('armed');
+  if (withSignal) {
+    $('#armedMsg').textContent = '合図のあと入水を待っています…';
+    beep(1000, 0.35);
+    S.t0 = S.srcType === 'file' ? vid.currentTime * 1000 : performance.now();
+  } else $('#armedMsg').textContent = '入水を待っています…（しぶきを自動で検出します）';
+  if (S.srcType === 'file' && vid.paused) { vid.playbackRate = parseFloat($('#selRate').value); vid.play(); }
+}
+$('#btnArm').onclick = () => { unlockAudio(); arm(false); };
+$('#btnArmSig').onclick = () => { unlockAudio(); arm(true); };
+$('#btnDisarm').onclick = () => { det = null; if (S.srcType === 'file') vid.pause(); setMode('ready'); };
+$('#inSens').oninput = () => { S.sens = +$('#inSens').value; $('#sensVal').textContent = S.sens; };
+
+function detect(t) {
+  pctx.drawImage(vid, 0, 0, PW, PH);
+  const d = pctx.getImageData(0, 0, PW, PH).data;
+  const sens = S.sens;
+  const thr = 55 - sens * 4;          // 明るさの増え方
+  const minLum = 175 - sens * 5;      // しぶきは白い
+  const warmup = det.warm < 15;
+  if (det.warm === 0) dev.fill(0);
+  const hitX = [], hitY = [];
+  for (let k = 0; k < maskIdx.length; k++) {
+    const i = maskIdx[k], o = i * 4;
+    const r = d[o], g = d[o + 1], b = d[o + 2];
+    const lum = (r * 77 + g * 150 + b * 29) >> 8;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (warmup) {
+      if (det.warm === 0) bg[i] = lum;
+      else { dev[i] += (Math.abs(lum - bg[i]) - dev[i]) * 0.3; bg[i] += (lum - bg[i]) * 0.3; }
+      continue;
+    }
+    const diff = lum - bg[i];
+    // 水面のキラキラ（いつもちらつく画素）は dev が大きいので反応しにくくする
+    if (diff > thr + 2.5 * dev[i] && lum > minLum && mx - mn < 70) { hitX.push(maskX[k]); hitY.push(maskY[k]); }
+    else { dev[i] += (Math.abs(diff) - dev[i]) * 0.05; bg[i] += diff * 0.04; }
+  }
+  det.warm++;
+  if (warmup) return;
+  // しぶきは一か所にまとまる：0.25m刻みで数え、幅0.75mで一番多い場所を探す
+  const BIN = 0.25, nb = Math.ceil((S.D + 2) / BIN) + 1, hist = new Int32Array(nb);
+  for (const X of hitX) hist[Math.min(nb - 1, Math.floor(X / BIN))]++;
+  let best = 0, bi = 0;
+  for (let k = 0; k < nb - 2; k++) { const c = hist[k] + hist[k + 1] + hist[k + 2]; if (c > best) { best = c; bi = k; } }
+  const minCnt = Math.max(6, maskIdx.length * 0.0025 * (11 - sens) / 5);
+  if (best >= minCnt) {
+    const lo = bi * BIN, hi = lo + 3 * BIN, cx = [], cy = [];
+    hitX.forEach((X, k) => { if (X >= lo && X < hi) { cx.push(X); cy.push(hitY[k]); } });
+    if (!det.cand) det.cand = { t, hitX: cx, hitY: cy, n: frameNo };
+    det.hits++;
+    if (det.hits >= 3 && !det.trig) trigger(det.cand);
+  } else { det.hits = 0; det.cand = null; }
+}
+function median(a) { const s = Float32Array.from(a).sort(); return s[s.length >> 1]; }
+
+function trigger(c) {
+  const X = median(c.hitX), Y = Math.min(1, Math.max(0, median(c.hitY)));
+  const p = applyH(S.Hi, X, Y);
+  det.trig = { t: c.t, pt: [p[0], p[1]], frameN: c.n };
+  det.post = 0;
+  beep(1600, 0.08); setTimeout(() => beep(2000, 0.12), 110);
+  try { navigator.vibrate?.(80); } catch (e) {}
+}
+
+function enterReview() {
+  // リングバッファを時間順に並べる
+  const frames = ring.filter(Boolean).slice().sort((a, b) => a.n - b.n)
+    .map(f => { const c = document.createElement('canvas'); c.width = f.c.width; c.height = f.c.height; c.getContext('2d').drawImage(f.c, 0, 0); return { c, t: f.t, n: f.n }; });
+  let idx = frames.findIndex(f => f.n >= det.trig.frameN); if (idx < 0) idx = frames.length - 1;
+  S.review = { frames, idx, pt: det.trig.pt, t: det.trig.t, t0: S.t0 };
+  det = null;
+  if (S.srcType === 'file') vid.pause();
+  const sl = $('#inFrame'); sl.max = frames.length - 1; sl.value = idx;
+  setMode('review'); showReview();
+}
+function showReview() {
+  const R = S.review;
+  const X = applyH(S.H, R.pt[0], R.pt[1])[0];
+  R.X = X;
+  $('#revD').textContent = X.toFixed(3) + ' m';
+  let s = `コマ ${R.idx + 1}/${R.frames.length}`;
+  if (R.t0 != null) s += `　合図→入水 ${((R.t - R.t0) / 1000).toFixed(2)} 秒（目安）`;
+  $('#revS').textContent = s;
+  draw();
+}
+$('#inFrame').oninput = () => { S.review.idx = +$('#inFrame').value; showReview(); };
+$('#btnPrev').onclick = () => { const R = S.review; R.idx = Math.max(0, R.idx - 1); $('#inFrame').value = R.idx; showReview(); };
+$('#btnNext').onclick = () => { const R = S.review; R.idx = Math.min(R.frames.length - 1, R.idx + 1); $('#inFrame').value = R.idx; showReview(); };
+$('#btnDiscard').onclick = () => { S.review = null; setMode('ready'); };
+$('#btnSave').onclick = () => {
+  const R = S.review;
+  const rec = {
+    id: Date.now(), date: new Date().toISOString(),
+    name: $('#inName').value.trim(), dist: +R.X.toFixed(3),
+    time: R.t0 != null ? +((R.t - R.t0) / 1000).toFixed(2) : null,
+  };
+  const h = loadHist(); h.unshift(rec); saveHist(h);
+  S.last = rec.dist.toFixed(3) + ' m';
+  S.review = null;
+  arm(false); // すぐ次の待機へ
+};
+
+// ---------- フレームごとの処理 ----------
+let loopGen = 0, redrawTimer = null;
+function startLoop() {
+  // 映像を切り替えると前の登録が消えるので、映像ごとに登録し直す
+  const gen = ++loopGen;
+  let lastRVFC = 0, lastKey = -1;
+  const onFrame = (meta) => {
+    if (vid.readyState >= 2 && S.mode === 'armed' && det) {
+      const t = S.srcType === 'file' ? (meta ? meta.mediaTime : vid.currentTime) * 1000
+        : (meta && meta.captureTime) || (meta && meta.expectedDisplayTime) || performance.now();
+      ringPush(t);
+      if (!det.trig) detect(t);
+      else if (++det.post >= 15 || (S.srcType === 'file' && vid.ended)) enterReview();
+    }
+    if (S.mode === 'armed' && S.srcType === 'file' && vid.ended && det && !det.trig) {
+      $('#armedMsg').textContent = '動画の最後まで入水を検出できませんでした。感度を上げて試してください。';
+    }
+    if (S.mode !== 'review') draw();
+  };
+  // 新しいコマの通知（対応ブラウザ）
+  if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+    const vstep = (now, meta) => {
+      if (gen !== loopGen) return;
+      lastRVFC = performance.now(); lastKey = meta.mediaTime;
+      onFrame(meta);
+      vid.requestVideoFrameCallback(vstep);
+    };
+    vid.requestVideoFrameCallback(vstep);
+  }
+  // 通知が来ない環境の予備：画面更新ごとにコマが変わっていれば処理する
+  const astep = () => {
+    if (gen !== loopGen) return;
+    if (performance.now() - lastRVFC > 300 && !vid.paused) {
+      const key = S.srcType === 'file' ? vid.currentTime : performance.now();
+      if (key !== lastKey) { lastKey = key; onFrame(null); }
+    }
+    requestAnimationFrame(astep);
+  };
+  requestAnimationFrame(astep);
+  // 一時停止中も描画は更新
+  if (!redrawTimer) redrawTimer = setInterval(() => { if (vid.paused && S.mode !== 'review') draw(); }, 250);
+}
+
+// ---------- 動画ファイルの操作 ----------
+$('#btnPlay').onclick = () => {
+  if (vid.paused) { vid.playbackRate = parseFloat($('#selRate').value); vid.play(); $('#btnPlay').textContent = '一時停止'; }
+  else { vid.pause(); $('#btnPlay').textContent = '再生'; }
+};
+vid.addEventListener('pause', () => $('#btnPlay').textContent = '再生');
+$('#selRate').onchange = () => vid.playbackRate = parseFloat($('#selRate').value);
+$('#btnRewind').onclick = () => { vid.currentTime = 0; };
+
+// ---------- 音 ----------
+let ac = null;
+function unlockAudio() { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); ac.resume(); } catch (e) {} }
+function beep(freq, dur) {
+  if (!ac) return;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = freq; o.type = 'square';
+  g.gain.setValueAtTime(0.25, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+  o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+}
+
+// ---------- 記録 ----------
+function loadHist() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch (e) { return []; } }
+function saveHist(h) { localStorage.setItem(HIST_KEY, JSON.stringify(h)); }
+function fmtDate(s) { const d = new Date(s); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+function renderHist() {
+  const h = loadHist(), list = $('#histList');
+  list.innerHTML = h.length ? '' : '<p class="msg">まだ記録がありません。</p>';
+  for (const r of h) {
+    const el = document.createElement('div'); el.className = 'item';
+    el.innerHTML = `<div class="dist">${r.dist.toFixed(2)}m</div>
+      <div class="meta"><b></b><br>${fmtDate(r.date)}${r.time != null ? '　' + r.time.toFixed(2) + '秒' : ''}</div>
+      <button class="danger">削除</button>`;
+    el.querySelector('b').textContent = r.name || '（名前なし）';
+    el.querySelector('button').onclick = () => { if (confirm('この記録を削除しますか？')) { saveHist(loadHist().filter(x => x.id !== r.id)); renderHist(); } };
+    list.appendChild(el);
+  }
+  if (h.length) {
+    const ds = h.map(r => r.dist), avg = ds.reduce((a, b) => a + b, 0) / ds.length;
+    $('#histStats').textContent = `${h.length}本　平均 ${avg.toFixed(2)} m　最長 ${Math.max(...ds).toFixed(2)} m`;
+  } else $('#histStats').textContent = '';
+}
+$('#btnHist').onclick = () => { renderHist(); $('#hist').classList.remove('hidden'); };
+$('#btnHistClose').onclick = () => $('#hist').classList.add('hidden');
+$('#btnCsv').onclick = () => {
+  const h = loadHist();
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [['日時', '名前', '距離(m)', '合図→入水(秒)'], ...h.map(r => [r.date, r.name, r.dist, r.time ?? ''])];
+  const csv = '﻿' + rows.map(r => r.map(esc).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `飛び込み距離_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+};
+
+resizeCanvas();
+setMode('source');
+</script>
+</body>
+</html>
