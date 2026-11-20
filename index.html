@@ -1,10 +1,84 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1620">
 <title>水泳計測ツール</title>
-<style>body{margin:0;font-family:-apple-system,"Hiragino Sans",sans-serif;background:#0b1620;color:#e8f1f7;padding:24px 16px}
-h1{font-size:20px}a{display:block;background:#22c3ee;color:#04202b;text-decoration:none;font-weight:700;padding:16px;border-radius:14px;margin:12px 0;font-size:17px}
-p{color:#8aa4b8;font-size:14px}</style></head>
-<body><h1>水泳計測ツール</h1>
-<a href="dive/">飛び込み距離計測</a>
-<p>スマホのブラウザで開いて使います。カメラの使用を求められたら「許可」を押してください。</p>
-</body></html>
+<style>
+:root{--bg:#0b1620;--card:#122230;--line:#1f3a4f;--text:#e8f1f7;--muted:#8aa4b8;--accent:#22c3ee;--ok:#3ddc84;--warn:#ffb020}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}
+.lead{color:var(--muted);font-size:14px;margin:0 0 20px}
+.open{display:block;background:var(--accent);color:#04202b;text-decoration:none;font-weight:800;padding:16px;border-radius:14px;font-size:18px;text-align:center}
+.open small{display:block;font-weight:600;font-size:12px;opacity:.75}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:16px}
+h2{font-size:16px;margin:0 0 10px}
+ol{margin:0;padding-left:0;list-style:none;counter-reset:s}
+ol li{counter-increment:s;position:relative;padding-left:38px;margin-bottom:14px;font-size:15px}
+ol li::before{content:counter(s);position:absolute;left:0;top:1px;width:26px;height:26px;border-radius:50%;
+  background:var(--accent);color:#04202b;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center}
+ol li:last-child{margin-bottom:0}
+ul{margin:0;padding-left:20px;font-size:14px}
+ul li{margin-bottom:6px}
+b{color:#fff}
+.note{color:var(--muted);font-size:13px}
+.pts{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:14px;margin:6px 0 2px;
+  background:#0e1b26;border-radius:10px;padding:8px 12px}
+.pts span:nth-child(odd){color:var(--warn);font-weight:800}
+</style></head>
+<body><main>
+<h1>水泳計測ツール</h1>
+<p class="lead">スマホのブラウザで開くだけで使える計測ツールです。インストールは要りません。</p>
+
+<a class="open" href="dive/">飛び込み距離計測を開く<small>入水位置までの距離をその場で測る</small></a>
+
+<section>
+  <h2>準備</h2>
+  <ul>
+    <li>スマホを三脚などで<b>固定</b>し、プールの<b>横（斜め横）</b>から撮ります。</li>
+    <li><b>スタート壁</b>と<b>5m地点</b>（ロープの色が変わる所・背泳ぎのフラッグ）が両方映るようにします。</li>
+    <li>はじめて開くとカメラの許可を聞かれるので「<b>許可</b>」を押します。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>使い方</h2>
+  <ol>
+    <li>「<b>カメラを使う</b>」を押す。</li>
+    <li>画面で<b>4点</b>をタップして基準を決める。
+      <div class="pts">
+        <span>①</span><span>スタート壁 × 手前のコースロープ</span>
+        <span>②</span><span>スタート壁 × 奥のコースロープ</span>
+        <span>③</span><span>奥のロープ上の 5m 地点</span>
+        <span>④</span><span>手前のロープ上の 5m 地点</span>
+      </div>
+      <span class="note">1mごとの線がプールの目印と合っていればOK。ずれたら点をドラッグして直し、「完了」。</span>
+    </li>
+    <li>「<b>待機</b>」を押す。入水のしぶきを自動で見つけ、音が鳴って距離が出ます。</li>
+    <li>コマ送りで入水の瞬間を確認。ずれていたら<b>手が入った位置をタップ</b>して直す。</li>
+    <li>名前を入れて「<b>保存して次へ</b>」。すぐ次の待機に戻ります。</li>
+  </ol>
+</section>
+
+<section>
+  <h2>便利な機能</h2>
+  <ul>
+    <li><b>タップ計測</b>：待機していないときに画面をタップすると、その点の距離が出ます。</li>
+    <li><b>合図音</b>：「合図音を鳴らして待機」で、合図→入水の時間（目安）も出ます。</li>
+    <li><b>記録</b>：右上の「記録」で一覧・平均・最長を表示。「CSV保存」でExcelに持ち出せます。</li>
+    <li><b>動画ファイルで試す</b>：撮影済みの動画でも同じように測れます。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>うまくいかないとき</h2>
+  <ul>
+    <li><b>反応しない</b> → 「検出感度」を上げる。</li>
+    <li><b>入水前に反応する</b> → 感度を下げる。スマホが揺れていないか確認。</li>
+    <li><b>距離がおかしい</b> → 「基準を打ち直す」で4点を置き直す。カメラを動かしたら毎回やり直します。</li>
+    <li><b>カメラが映らない</b> → ブラウザの設定でカメラを許可。iPhone は Safari で開くのが確実です。</li>
+  </ul>
+  <p class="note">記録はこのスマホのブラウザの中に保存されます。消えないよう、ときどきCSVで保存してください。<br>
+  Safari の共有ボタン →「ホーム画面に追加」で、アプリのように開けます。</p>
+</section>
+</main></body></html>
